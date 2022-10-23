@@ -17,24 +17,25 @@ BRANCH = "main"
 
 
 def recognize_os():
-    os_name = ""
-    os_copy = ""
-    os_rm = ""
     if os.name == "nt":
         os_name = "windows"
         os_copy = "copy"
         os_rm = "rmdir /s /q"
+        os_7z = "7z"
+        python_int = "python "
         d = "\\"
     if os.name == "posix":
         os_name = "linux"
         os_copy = "cp"
         os_rm = "rm -rf"
+        os_7z = "7zz"
         d = "/"
-    return d, os_name, os_copy, os_rm
+        python_int = ""
+    return d, os_name, os_copy, os_rm, os_7z, python_int
 
 
 # OS dependent path delimiter
-dlr, os_name, os_copy, os_rm = recognize_os()
+dlr, os_name, os_copy, os_rm, os_7z, python_int = recognize_os()
 # build setup variables
 root_dir = os.getcwd() + dlr
 setup_dirs = [
@@ -111,7 +112,7 @@ def revert_entry():
 def build(action, platform, env, srcdir, outdir):
     try:
         os_cmd = (
-            builder_name
+            python_int + builder_name
             + " -a "
             + action
             + " -p "
@@ -151,19 +152,20 @@ def create_package(platform, outdir, tempdir):
         sys.exit(12)
 
     # create package depending on platform
+    current_build = read_filename(sln_file)
     if platform == "x64":
         try:
             current_build = read_filename(sln_file)
             os_cmd = (
-                "7zz a "
-                + re.sub(outdir, tempdir, current_build)
+                os_7z + " a "
+                + re.sub(re.escape(outdir), re.escape(tempdir), current_build)
                 + ".7z "
                 + current_build
             )
             if os.system(os_cmd) != 0:
                 raise Exception("Can't perform command: " + os_cmd)
         except Exception as e:
-            msg = "Package creation failed: " + str(e)
+            msg = "Package x64 creation failed: " + str(e)
             print(msg)
             send_email("BUILD FAILED: " + msg, info_list)
             sys.exit(32)
@@ -172,12 +174,10 @@ def create_package(platform, outdir, tempdir):
         try:
             # run ps5package.exe file
             os_cmd = (
-                ps5package_name + " -c " + ps5config_ini + " " + outdir + " " + tempdir
+                python_int + ps5package_name + " -c " + ps5config_ini + " " + outdir + " " + tempdir
             )
             if os.system(os_cmd) != 0:
                 raise Exception("Can't perform command: " + os_cmd)
-
-            # ./ps5package.py -c ps5config.ini Output-0 Temp/-2
 
         except Exception as e:
             msg = "Package creation failed: " + str(e)
@@ -209,13 +209,14 @@ def find_latest_file(path):
     # linux: ls -1t - chrono. order
     # windows: dir /b /a-d /od -- reversed chrono.order
     # windows: dir /b /a-d /o-d -- chrono. order
-
-    if os_name == "windows":
-        files = os.popen("dir /b /a-d /o-d " + path).read().splitlines()
-    else:
-        files = os.popen("ls -1t " + path).read().splitlines()
-
-    return files[0]
+    try:
+        if os_name == "windows":
+            files = os.popen("dir /b /a-d /o-d " + path).read().splitlines()
+        else:
+            files = os.popen("ls -1t " + path).read().splitlines()
+        return files[0]
+    except Exception as e:
+        print("\nFAILED, probably empty " + path + " directory\n" + str(e) + "\n")
 
 
 def upload_package(package, destination):
@@ -223,14 +224,15 @@ def upload_package(package, destination):
         os.makedirs(destination)
         print(destination)
     os.system(os_copy + " " + package + " " + destination)
-    info_list.append(destination + dlr + re.sub(setup_dirs[1], "", package))
+    escaped_temp = re.escape(setup_dirs[1])
+    print(destination + dlr + re.sub(escaped_temp, "", package))
+    info_list.append(destination + dlr + re.sub(escaped_temp, "", package))
 
 
 def send_email(status, location_info):
     print("\n\nsending fake email:....\n")
     print(status)
     print(location_info)
-
 
 if __name__ == "__main__":
 
@@ -270,7 +272,7 @@ if __name__ == "__main__":
         for i in range(2):
             if os.path.exists(setup_dirs[i]):
                 os.system(os_rm + " " + setup_dirs[i])
-                print(setup_dirs[i] + "deleted recursively")
+                print(setup_dirs[i] + " deleted recursively")
     if parameters.action == "clean":
         print("Exiting.")
         sys.exit(0)
